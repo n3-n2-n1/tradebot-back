@@ -1,0 +1,2 @@
+#!/bin/sh
+uvicorn backend.backend:app --host 0.0.0.0 --port $PORT

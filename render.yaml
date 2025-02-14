@@ -1,0 +1,17 @@
+services:
+  - name: fastapi-arbitrage
+    type: web
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "sh start.sh"
+    autoDeploy: true
+    envVars:
+      - key: OKX_API_KEY
+        sync: false
+      - key: OKX_SECRET_KEY
+        sync: false
+      - key: DERIBIT_CLIENT_ID
+        sync: false
+      - key: DERIBIT_SECRET_KEY
+        sync: false
