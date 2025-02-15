@@ -11,14 +11,54 @@ OKX_API_KEY = os.getenv("OKX_API_KEY", "f90aea6f-def9-41b8-b822-24c988cf675b")
 OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "EE8F8D258BB153E91F3EC7E775BD036E")
 DERIBIT_API_KEY = os.getenv("DERIBIT_CLIENT_ID", "WBmw1gcI")
 DERIBIT_SECRET_KEY = os.getenv("DERIBIT_SECRET_KEY", "LaPPE-wBrlqtyTeo5ExX0SOUoq1la401mr5YvMb20QY")
-
+BYBIT_API_KEY = os.getenv("BYBIT_API_KEY", "TU_BYBIT_API_KEY")
+BYBIT_SECRET_KEY = os.getenv("BYBIT_SECRET_KEY", "TU_BYBIT_SECRET_KEY")
 class ExchangeAPI:
     def __init__(self, name, base_url):
         self.name = name
         self.base_url = base_url
         self.price = None
         self.funding_rate = None
+        
+    def generate_signature(self, params, secret_key):
+            """Genera la firma HMAC-SHA256 para la autenticación en Bybit/OKX."""
+            sorted_params = sorted(params.items())
+            query_string = "&".join(f"{key}={value}" for key, value in sorted_params)
+            return hmac.new(secret_key.encode(), query_string.encode(), hashlib.sha256).hexdigest()
 
+    async def execute_order(self, side, quantity):
+        """Ejecuta una orden en el exchange."""
+        order_url = f"{self.base_url}/v5/order/create"
+        timestamp = str(int(time.time() * 1000))  # Timestamp en milisegundos
+
+        order_data = {
+            "category": "linear",
+            "symbol": "BTCUSDT",
+            "side": side,  # "Buy" para Long, "Sell" para Short
+            "orderType": "Market",
+            "qty": quantity,
+            "timestamp": timestamp,
+        }
+
+        if self.name == "Bybit":
+            api_key = BYBIT_API_KEY
+            secret_key = BYBIT_SECRET_KEY
+            order_data["api_key"] = api_key
+            order_data["sign"] = self.generate_signature(order_data, secret_key)
+
+        elif self.name == "OKX":
+            api_key = OKX_API_KEY
+            secret_key = OKX_SECRET_KEY
+            order_data["apiKey"] = api_key
+            order_data["sign"] = self.generate_signature(order_data, secret_key)
+
+        headers = {"Content-Type": "application/json"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(order_url, headers=headers, json=order_data) as resp:
+                response_data = await resp.json()
+                return response_data
+    
     async def fetch_data(self):
             """Obtiene datos de precio y funding rate del exchange."""
             async with aiohttp.ClientSession() as session:
@@ -53,7 +93,6 @@ class ExchangeAPI:
                 except Exception as e:
                     print(f"❌ [ERROR] en {self.name}: {e}")
                     self.price, self.funding_rate = None, None
-
                     try:
                         if self.name == "OKX":
                             ticker_url = f"{self.base_url}/market/ticker?instId=BTC-USDT-SWAP"

@@ -4,7 +4,7 @@ import json
 import os
 from fastapi.middleware.cors import CORSMiddleware
 from exchange import ExchangeAPI, ArbitrageBot
-
+from pydantic import BaseModel
 
 # Cargar claves API desde variables de entorno
 OKX_API_KEY = os.getenv("OKX_API_KEY", "f90aea6f-def9-41b8-b822-24c988cf675b")
@@ -95,3 +95,20 @@ async def websocket_endpoint(websocket: WebSocket):
         except Exception as e:
             print(f"WebSocket error: {e}")
             break
+        
+class TradeRequest(BaseModel):
+    side: str  # "Buy" o "Sell"
+    quantity: float
+    exchange: str  # "OKX" o "Bybit"
+
+@app.post("/trade")
+async def execute_trade(request: TradeRequest):
+    """Ejecuta una orden en OKX o Bybit."""
+    if request.exchange == "OKX":
+        response = await exchange_okx.execute_order(request.side, request.quantity)
+    elif request.exchange == "Bybit":
+        response = await exchange_bybit.execute_order(request.side, request.quantity)
+    else:
+        return {"error": "Exchange no soportado"}
+
+    return {"exchange": request.exchange, "response": response}
