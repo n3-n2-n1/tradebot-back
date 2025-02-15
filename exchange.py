@@ -38,19 +38,28 @@ class ExchangeAPI:
                             funding_data = await funding_response.json()
 
                         if "data" in ticker_data and ticker_data["data"]:
-                            self.prices["BTCUSDT"] = float(ticker_data["data"][0].get("last", 0))
+                            self.prices["OKX_BTCUSDT"] = float(ticker_data["data"][0].get("last", 0))
 
                         if "data" in funding_data and funding_data["data"]:
                             funding_rate_raw = funding_data["data"][0].get("fundingRate", "0")
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)
+                                self.funding_rates["OKX_BTCUSDT"] = round(float(funding_rate_raw), 6)
                             except ValueError:
-                                print(f"Error: No se pudo convertir a float {funding_rate_raw}")
-                                self.funding_rates["BTCUSDT"] = 0.0  
+                                print(f"⚠️ [OKX] No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
+                                self.funding_rates["OKX_BTCUSDT"] = 0.0  
+
+                        print(f"📊 [OKX] Precio: {self.prices['OKX_BTCUSDT']:.2f}, Funding Rate: {self.funding_rates['OKX_BTCUSDT']:.6f}")
 
                     elif self.name == "Deribit":
                         ticker_url = f"{self.base_url}/public/get_index_price?index_name=btc_usd"
-                        funding_url = f"{self.base_url}/public/get_funding_rate?instrument_name=BTC-PERPETUAL"
+
+                        end_timestamp = int(datetime.utcnow().timestamp() * 1000)
+                        start_timestamp = end_timestamp - (24 * 60 * 60 * 1000)
+
+                        funding_url = (
+                            f"{self.base_url}/public/get_funding_rate_history"
+                            f"?instrument_name=BTC-PERPETUAL&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
+                        )
 
                         async with session.get(ticker_url, timeout=5) as ticker_response:
                             ticker_data = await ticker_response.json()
@@ -58,74 +67,39 @@ class ExchangeAPI:
                         async with session.get(funding_url, timeout=5) as funding_response:
                             funding_data = await funding_response.json()
 
-                        if "result" in ticker_data:
-                            self.prices["BTCUSDT"] = float(ticker_data["result"].get("index_price", 0))
+                        # 📡 Depuración: Mostrar respuesta cruda de Deribit
+                        print(f"📡 [DEBUG] Respuesta de Deribit Funding Rate: {funding_data}")
 
-                        if "result" in funding_data and "funding_rate" in funding_data["result"]:
-                            funding_rate_raw = funding_data["result"]["funding_rate"]
+                        # ✅ Extraer precio de Deribit y guardarlo en una variable separada
+                        if "result" in ticker_data:
+                            self.prices["Deribit_BTCUSDT"] = float(ticker_data["result"].get("index_price", 0))
+                        else:
+                            print("⚠️ [Deribit] No se encontró index_price en la respuesta.")
+
+                        # ✅ Extraer funding rate de Deribit (último disponible) y guardarlo en una variable separada
+                        if "result" in funding_data and isinstance(funding_data["result"], list) and len(funding_data["result"]) > 0:
+                            funding_rate_raw = funding_data["result"][-1].get("interest_8h", "0")
 
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)
+                                self.funding_rates["Deribit_BTCUSDT"] = round(float(funding_rate_raw), 6)
                             except ValueError:
-                                print(f"⚠️ Error: No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
-                                self.funding_rates["BTCUSDT"] = 0.0
+                                print(f"⚠️ [Deribit] No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
+                                self.funding_rates["Deribit_BTCUSDT"] = 0.0
                         else:
-                            print("⚠️ Warning: No funding_rate found in Deribit response, asignando 0.0")
-                            self.funding_rates["BTCUSDT"] = 0.0
+                            print("⚠️ [Deribit] No se encontró funding_rate en la respuesta, asignando 0.0")
+                            self.funding_rates["Deribit_BTCUSDT"] = 0.0
 
-                    # ✅ Solución: Convertimos a float ANTES de imprimir
-                    price_okx = self.prices.get('BTCUSDT', 0.0)
-                    funding_okx = self.funding_rates.get('BTCUSDT', 0.0)
-                    price_deribit = self.prices.get('BTCUSDT', 0.0)
-                    funding_deribit = self.funding_rates.get('BTCUSDT', 0.0)
+                        print(f"📊 [Deribit] Precio: {self.prices['Deribit_BTCUSDT']:.2f}, Funding Rate: {self.funding_rates['Deribit_BTCUSDT']:.6f}")
 
-                    print(f"OKX - Price: {price_okx:.2f}, Funding Rate: {funding_okx:.6f}")
-                    print(f"Deribit - Price: {price_deribit:.2f}, Funding Rate: {funding_deribit:.6f}")
+                    # ✅ Imprimir valores separados de cada exchange para evitar confusión
+                    print(f"\n✅ Estado Final:")
+                    print(f"    OKX     -> Precio: {self.prices.get('OKX_BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('OKX_BTCUSDT', 'N/A'):.6f}")
+                    print(f"    Deribit -> Precio: {self.prices.get('Deribit_BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('Deribit_BTCUSDT', 'N/A'):.6f}\n")
 
                 except Exception as e:
-                    print(f"❌ Error en {self.name}: {e}")
+                    print(f"❌ [ERROR] en {self.name}: {e}")
 
                 await asyncio.sleep(2)
-       
-                
-    async def place_order_okx(self, side, size, leverage):
-        """Coloca una orden en OKX"""
-        order_url = f"{self.base_url}/api/v5/trade/order"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-        order_data = {
-            "instId": "BTC-USDT-SWAP",
-            "tdMode": "cross",
-            "side": side,
-            "ordType": "market",
-            "sz": str(size),
-            "lever": str(leverage)
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(order_url, json=order_data, headers=headers) as response:
-                return await response.json()
-            
-    async def place_order_deribit(self, direction, amount, leverage):
-        """Coloca una orden en Deribit"""
-        order_url = f"{self.base_url}/private/{direction}"
-        headers = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
-
-        order_data = {
-            "instrument_name": "BTC-PERPETUAL",
-            "amount": amount,
-            "leverage": leverage,
-            "type": "market"
-        }
-
-        async with aiohttp.ClientSession() as session:
-            async with session.post(order_url, json=order_data, headers=headers) as response:
-                return await response.json()
-
 
 
 class ArbitrageBot:
