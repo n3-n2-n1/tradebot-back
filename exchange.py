@@ -43,7 +43,7 @@ class ExchangeAPI:
                         if "data" in funding_data and funding_data["data"]:
                             funding_rate_raw = funding_data["data"][0].get("fundingRate", "0")
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)  # No multiplicamos por 100
+                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)
                             except ValueError:
                                 print(f"Error: No se pudo convertir a float {funding_rate_raw}")
                                 self.funding_rates["BTCUSDT"] = 0.0  
@@ -65,18 +65,28 @@ class ExchangeAPI:
                             funding_rate_raw = funding_data["result"]["funding_rate"]
 
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)  # No multiplicar por 100
+                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)
                             except ValueError:
-                                print(f"Error: No se pudo convertir a float {funding_rate_raw}")
-                                self.funding_rates["BTCUSDT"] = 0.0  
+                                print(f"⚠️ Error: No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
+                                self.funding_rates["BTCUSDT"] = 0.0
+                        else:
+                            print("⚠️ Warning: No funding_rate found in Deribit response, asignando 0.0")
+                            self.funding_rates["BTCUSDT"] = 0.0
 
-                    print(f"{self.name} - Price: {self.prices.get('BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('BTCUSDT', 'N/A'):.6f}")
+                    # ✅ Solución: Convertimos a float ANTES de imprimir
+                    price_okx = self.prices.get('BTCUSDT', 0.0)
+                    funding_okx = self.funding_rates.get('BTCUSDT', 0.0)
+                    price_deribit = self.prices.get('BTCUSDT', 0.0)
+                    funding_deribit = self.funding_rates.get('BTCUSDT', 0.0)
+
+                    print(f"OKX - Price: {price_okx:.2f}, Funding Rate: {funding_okx:.6f}")
+                    print(f"Deribit - Price: {price_deribit:.2f}, Funding Rate: {funding_deribit:.6f}")
 
                 except Exception as e:
-                    print(f"Error en {self.name}: {e}")
+                    print(f"❌ Error en {self.name}: {e}")
 
                 await asyncio.sleep(2)
-                
+       
                 
     async def place_order_okx(self, side, size, leverage):
         """Coloca una orden en OKX"""
