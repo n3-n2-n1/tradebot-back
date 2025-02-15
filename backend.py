@@ -62,42 +62,58 @@ def get_status():
     return {
         "OKX": {
             "price": exchange_okx.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": exchange_okx.funding_rates.get("BTCUSDT", "N/A")
+            "funding_rate": exchange_okx.funding_rates.get("BTCUSDT", "N/A"),
         },
         "Deribit": {
             "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": exchange_deribit.funding_rates.get("BTCUSDT", "N/A")
-        }
+            "funding_rate": exchange_deribit.funding_rates.get("BTCUSDT", "N/A"),
+        },
     }
 
 @app.get("/arbitrage-status")
 def get_arbitrage_status():
-    """Devuelve los datos en tiempo real de precios, funding rates y oportunidades de arbitraje."""
+    """Devuelve si hay oportunidad de arbitraje y qué acción tomar."""
     funding_okx = exchange_okx.funding_rates.get("BTCUSDT", 0)
     funding_deribit = exchange_deribit.funding_rates.get("BTCUSDT", 0)
 
     opportunity = None
+    action = "No arbitrage opportunity"
+
     if funding_deribit > funding_okx:
-        opportunity = {"action": "Short on Deribit, Long on OKX"}
+        opportunity = {
+            "short_exchange": "Deribit",
+            "long_exchange": "OKX",
+            "short_funding_rate": funding_deribit,
+            "long_funding_rate": funding_okx,
+            "action": "Short on Deribit, Long on OKX"
+        }
     elif funding_okx > funding_deribit:
-        opportunity = {"action": "Short on OKX, Long on Deribit"}
+        opportunity = {
+            "short_exchange": "OKX",
+            "long_exchange": "Deribit",
+            "short_funding_rate": funding_okx,
+            "long_funding_rate": funding_deribit,
+            "action": "Short on OKX, Long on Deribit"
+        }
 
     return {
         "OKX": {
             "price": exchange_okx.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": funding_okx
+            "funding_rate": funding_okx,
         },
         "Deribit": {
             "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": funding_deribit
+            "funding_rate": funding_deribit,
         },
-        "arbitrage_opportunity": opportunity
+        "arbitrage_opportunity": opportunity if opportunity else action
     }
+
+logs = []  # Lista para almacenar logs del bot
 
 @app.get("/logs")
 def get_logs():
-    """Devuelve los últimos logs de ejecución del bot."""
-    return {"message": "Últimos logs de trading disponibles en la terminal."}
+    """Devuelve los últimos logs del bot."""
+    return {"logs": logs[-10:]}  # Devuelve los últimos 10 logs
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -112,7 +128,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 "Deribit": {
                     "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
                     "funding_rate": exchange_deribit.funding_rates.get("BTCUSDT", "N/A")
-                }
+                },
+                "arbitrage_opportunity": get_arbitrage_status()
             }
             await websocket.send_text(json.dumps(data))
             await asyncio.sleep(5)

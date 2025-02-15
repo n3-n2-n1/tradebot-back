@@ -43,19 +43,14 @@ class ExchangeAPI:
                         if "data" in funding_data and funding_data["data"]:
                             funding_rate_raw = funding_data["data"][0].get("fundingRate", "0")
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)
+                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)  # No multiplicamos por 100
                             except ValueError:
                                 print(f"Error: No se pudo convertir a float {funding_rate_raw}")
                                 self.funding_rates["BTCUSDT"] = 0.0  
 
                     elif self.name == "Deribit":
                         ticker_url = f"{self.base_url}/public/get_index_price?index_name=btc_usd"
-                        end_timestamp = int(datetime.utcnow().timestamp() * 1000)
-                        start_timestamp = end_timestamp - (24 * 60 * 60 * 1000)
-                        funding_url = (
-                            f"{self.base_url}/public/get_funding_rate_history"
-                            f"?instrument_name=BTC-PERPETUAL&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
-                        )
+                        funding_url = f"{self.base_url}/public/get_funding_rate?instrument_name=BTC-PERPETUAL"
 
                         async with session.get(ticker_url, timeout=5) as ticker_response:
                             ticker_data = await ticker_response.json()
@@ -65,21 +60,63 @@ class ExchangeAPI:
 
                         if "result" in ticker_data:
                             self.prices["BTCUSDT"] = float(ticker_data["result"].get("index_price", 0))
-                        if "result" in funding_data and isinstance(funding_data["result"], list) and len(funding_data["result"]) > 0:
-                            funding_rate_raw = funding_data["result"][0].get("interest_8h", "0")
+
+                        if "result" in funding_data and "funding_rate" in funding_data["result"]:
+                            funding_rate_raw = funding_data["result"]["funding_rate"]
 
                             try:
-                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw) * 100, 6)
+                                self.funding_rates["BTCUSDT"] = round(float(funding_rate_raw), 6)  # No multiplicar por 100
                             except ValueError:
-                                print(f"Error: No se pudo convertir a float {funding_rate_raw}, Tipo: {type(funding_rate_raw)}")
+                                print(f"Error: No se pudo convertir a float {funding_rate_raw}")
                                 self.funding_rates["BTCUSDT"] = 0.0  
 
                     print(f"{self.name} - Price: {self.prices.get('BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('BTCUSDT', 'N/A'):.6f}")
-                
+
                 except Exception as e:
                     print(f"Error en {self.name}: {e}")
-                
+
                 await asyncio.sleep(2)
+                
+                
+    async def place_order_okx(self, side, size, leverage):
+        """Coloca una orden en OKX"""
+        order_url = f"{self.base_url}/api/v5/trade/order"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+        order_data = {
+            "instId": "BTC-USDT-SWAP",
+            "tdMode": "cross",
+            "side": side,
+            "ordType": "market",
+            "sz": str(size),
+            "lever": str(leverage)
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(order_url, json=order_data, headers=headers) as response:
+                return await response.json()
+            
+    async def place_order_deribit(self, direction, amount, leverage):
+        """Coloca una orden en Deribit"""
+        order_url = f"{self.base_url}/private/{direction}"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+        order_data = {
+            "instrument_name": "BTC-PERPETUAL",
+            "amount": amount,
+            "leverage": leverage,
+            "type": "market"
+        }
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(order_url, json=order_data, headers=headers) as response:
+                return await response.json()
+
+
 
 class ArbitrageBot:
     def __init__(self, exchange_a, exchange_b, leverage=4):
