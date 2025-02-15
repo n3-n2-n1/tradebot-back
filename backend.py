@@ -5,14 +5,6 @@ import os
 from fastapi.middleware.cors import CORSMiddleware
 from exchange import ExchangeAPI, ArbitrageBot
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Puedes cambiar "*" por ["http://localhost:3000"] si solo usas Next.js local
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Cargar claves API desde variables de entorno
 OKX_API_KEY = os.getenv("OKX_API_KEY", "f90aea6f-def9-41b8-b822-24c988cf675b")
@@ -20,116 +12,83 @@ OKX_SECRET_KEY = os.getenv("OKX_SECRET_KEY", "EE8F8D258BB153E91F3EC7E775BD036E")
 DERIBIT_API_KEY = os.getenv("DERIBIT_CLIENT_ID", "WBmw1gcI")
 DERIBIT_SECRET_KEY = os.getenv("DERIBIT_SECRET_KEY", "LaPPE-wBrlqtyTeo5ExX0SOUoq1la401mr5YvMb20QY")
 
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Puedes cambiar "*" por ["http://localhost:3000"]
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Instancias de las APIs
-exchange_okx = ExchangeAPI("OKX", "https://www.okx.com/api/v5", OKX_API_KEY, OKX_SECRET_KEY)
-exchange_deribit = ExchangeAPI("Deribit", "https://www.deribit.com/api/v2", DERIBIT_API_KEY, DERIBIT_SECRET_KEY)
-
-bot = ArbitrageBot(exchange_okx, exchange_deribit)
+exchange_okx = ExchangeAPI("OKX", "https://www.okx.com/api/v5")
+exchange_bybit = ExchangeAPI("Bybit", "https://api.bybit.com")  # Cambiado de Deribit a Bybit
+bot = ArbitrageBot(exchange_okx, exchange_bybit)
 
 @app.on_event("startup")
 async def startup_event():
-    """Inicia la recolección de datos en segundo plano al arrancar el servidor"""
+    """Inicia la recolección de datos y el bot de arbitraje."""
     asyncio.create_task(exchange_okx.fetch_data())
-    asyncio.create_task(exchange_deribit.fetch_data())
-
-@app.get("/start")
-async def start_bot():
-    """Inicia el bot de arbitraje."""
+    asyncio.create_task(exchange_bybit.fetch_data())  # Cambiado de Deribit a Bybit
     asyncio.create_task(bot.run())
-    return {"message": "Bot started"}
-
-@app.on_event("startup")
-async def startup_event():
-    """Inicia la recolección de datos en segundo plano al arrancar el servidor"""
-    if not hasattr(exchange_okx, "_fetch_started"):
-        exchange_okx._fetch_started = True
-        asyncio.create_task(exchange_okx.fetch_data())
-
-    if not hasattr(exchange_deribit, "_fetch_started"):
-        exchange_deribit._fetch_started = True
-        asyncio.create_task(exchange_deribit.fetch_data())
-
-@app.get("/start")
-async def start_bot():
-    """Inicia el bot de arbitraje."""
-    asyncio.create_task(bot.run())
-    return {"message": "Bot started"}
-
+    
 @app.get("/status")
-def get_status():
-    """Devuelve los últimos datos de precios y tasas de financiamiento."""
+async def get_status():
+    def format_rate(rate):
+        return f"{rate:.8f}" if isinstance(rate, (float, int)) else "N/A"
+
     return {
         "OKX": {
-            "price": exchange_okx.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": exchange_okx.funding_rates.get("BTCUSDT", "N/A"),
+            "price": round(exchange_okx.price, 2) if exchange_okx.price else "N/A",
+            "funding_rate": format_rate(exchange_okx.funding_rate),
         },
-        "Deribit": {
-            "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": exchange_deribit.funding_rates.get("BTCUSDT", "N/A"),
+        "Bybit": {
+            "price": round(exchange_bybit.price, 2) if exchange_bybit.price else "N/A",
+            "funding_rate": format_rate(exchange_bybit.funding_rate),
         },
     }
 
 @app.get("/arbitrage-status")
-def get_arbitrage_status():
-    """Devuelve si hay oportunidad de arbitraje y qué acción tomar."""
-    funding_okx = exchange_okx.funding_rates.get("BTCUSDT", 0)
-    funding_deribit = exchange_deribit.funding_rates.get("BTCUSDT", 0)
+async def get_arbitrage_status():
+    """Verifica si hay oportunidad de arbitraje."""
+    funding_okx = exchange_okx.funding_rate
+    funding_bybit = exchange_bybit.funding_rate  # Cambiado de Deribit a Bybit
 
-    opportunity = None
-    action = "No arbitrage opportunity"
+    if funding_okx is None or funding_bybit is None:
+        return {"error": "Datos no disponibles"}
 
-    if funding_deribit > funding_okx:
-        opportunity = {
-            "short_exchange": "Deribit",
+    if funding_bybit > funding_okx:
+        return {
+            "short_exchange": "Bybit",  # Cambiado de Deribit a Bybit
             "long_exchange": "OKX",
-            "short_funding_rate": funding_deribit,
-            "long_funding_rate": funding_okx,
-            "action": "Short on Deribit, Long on OKX"
+            "action": "Short en Bybit, Long en OKX"
         }
-    elif funding_okx > funding_deribit:
-        opportunity = {
+    elif funding_okx > funding_bybit:
+        return {
             "short_exchange": "OKX",
-            "long_exchange": "Deribit",
-            "short_funding_rate": funding_okx,
-            "long_funding_rate": funding_deribit,
-            "action": "Short on OKX, Long on Deribit"
+            "long_exchange": "Bybit",  # Cambiado de Deribit a Bybit
+            "action": "Short en OKX, Long en Bybit"
         }
-
-    return {
-        "OKX": {
-            "price": exchange_okx.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": funding_okx,
-        },
-        "Deribit": {
-            "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
-            "funding_rate": funding_deribit,
-        },
-        "arbitrage_opportunity": opportunity if opportunity else action
-    }
-
-logs = []  # Lista para almacenar logs del bot
-
-@app.get("/logs")
-def get_logs():
-    """Devuelve los últimos logs del bot."""
-    return {"logs": logs[-10:]}  # Devuelve los últimos 10 logs
+    else:
+        return {"message": "No hay oportunidad de arbitraje"}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket para enviar datos en tiempo real."""
     await websocket.accept()
     while True:
         try:
             data = {
                 "OKX": {
-                    "price": exchange_okx.prices.get("BTCUSDT", "N/A"),
-                    "funding_rate": exchange_okx.funding_rates.get("BTCUSDT", "N/A")
+                    "price": exchange_okx.price or "N/A",
+                    "funding_rate": exchange_okx.funding_rate or "N/A"
                 },
-                "Deribit": {
-                    "price": exchange_deribit.prices.get("BTCUSDT", "N/A"),
-                    "funding_rate": exchange_deribit.funding_rates.get("BTCUSDT", "N/A")
+                "Bybit": {  # Cambiado de Deribit a Bybit
+                    "price": exchange_bybit.price or "N/A",
+                    "funding_rate": exchange_bybit.funding_rate or "N/A"
                 },
-                "arbitrage_opportunity": get_arbitrage_status()
+                "arbitrage_opportunity": await get_arbitrage_status()
             }
             await websocket.send_text(json.dumps(data))
             await asyncio.sleep(5)

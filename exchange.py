@@ -13,137 +13,91 @@ DERIBIT_API_KEY = os.getenv("DERIBIT_CLIENT_ID", "WBmw1gcI")
 DERIBIT_SECRET_KEY = os.getenv("DERIBIT_SECRET_KEY", "LaPPE-wBrlqtyTeo5ExX0SOUoq1la401mr5YvMb20QY")
 
 class ExchangeAPI:
-    def __init__(self, name, base_url, api_key, api_secret):
+    def __init__(self, name, base_url):
         self.name = name
         self.base_url = base_url
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.prices = {}
-        self.funding_rates = {}
-        self.position_open = False  
-    
+        self.price = None
+        self.funding_rate = None
+
     async def fetch_data(self):
-        """Obtiene datos en tiempo real de la API de forma asíncrona."""
-        async with aiohttp.ClientSession() as session:
-            while True:
+            """Obtiene datos de precio y funding rate del exchange."""
+            async with aiohttp.ClientSession() as session:
                 try:
                     if self.name == "OKX":
                         ticker_url = f"{self.base_url}/market/ticker?instId=BTC-USDT-SWAP"
                         funding_url = f"{self.base_url}/public/funding-rate?instId=BTC-USDT-SWAP"
+                    else:  # Bybit (reemplazamos Deribit)
+                        ticker_url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
+                        funding_url = f"{self.base_url}/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=1"
 
-                        async with session.get(ticker_url, timeout=5) as ticker_response:
-                            ticker_data = await ticker_response.json()
 
-                        async with session.get(funding_url, timeout=5) as funding_response:
-                            funding_data = await funding_response.json()
+                    async with session.get(ticker_url) as resp_ticker, session.get(funding_url) as resp_funding:
+                        ticker_data = await resp_ticker.json()
+                        funding_data = await resp_funding.json()
 
-                        if "data" in ticker_data and ticker_data["data"]:
-                            self.prices["OKX_BTCUSDT"] = float(ticker_data["data"][0].get("last", 0))
-
-                        if "data" in funding_data and funding_data["data"]:
-                            funding_rate_raw = funding_data["data"][0].get("fundingRate", "0")
-                            try:
-                                self.funding_rates["OKX_BTCUSDT"] = round(float(funding_rate_raw), 6)
-                            except ValueError:
-                                print(f"⚠️ [OKX] No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
-                                self.funding_rates["OKX_BTCUSDT"] = 0.0  
-
-                        print(f"📊 [OKX] Precio: {self.prices['OKX_BTCUSDT']:.2f}, Funding Rate: {self.funding_rates['OKX_BTCUSDT']:.6f}")
-
-                    elif self.name == "Deribit":
-                        ticker_url = f"{self.base_url}/public/get_index_price?index_name=btc_usd"
-
-                        end_timestamp = int(datetime.utcnow().timestamp() * 1000)
-                        start_timestamp = end_timestamp - (24 * 60 * 60 * 1000)
-
-                        funding_url = (
-                            f"{self.base_url}/public/get_funding_rate_history"
-                            f"?instrument_name=BTC-PERPETUAL&start_timestamp={start_timestamp}&end_timestamp={end_timestamp}"
-                        )
-
-                        async with session.get(ticker_url, timeout=5) as ticker_response:
-                            ticker_data = await ticker_response.json()
-
-                        async with session.get(funding_url, timeout=5) as funding_response:
-                            funding_data = await funding_response.json()
-
-                        # 📡 Depuración: Mostrar respuesta cruda de Deribit
-                        print(f"📡 [DEBUG] Respuesta de Deribit Funding Rate: {funding_data}")
-
-                        # ✅ Extraer precio de Deribit y guardarlo en una variable separada
-                        if "result" in ticker_data:
-                            self.prices["Deribit_BTCUSDT"] = float(ticker_data["result"].get("index_price", 0))
+                    # Procesar respuestas
+                    if self.name == "OKX":
+                        self.price = float(ticker_data["data"][0]["last"]) if "data" in ticker_data else None
+                        self.funding_rate = float(funding_data["data"][0]["fundingRate"]) if "data" in funding_data else None
+                    else:  # Bybit
+                        if "result" in ticker_data and "list" in ticker_data["result"]:
+                            self.price = float(ticker_data["result"]["list"][0]["lastPrice"])
                         else:
-                            print("⚠️ [Deribit] No se encontró index_price en la respuesta.")
+                            self.price = None
 
-                        # ✅ Extraer funding rate de Deribit (último disponible) y guardarlo en una variable separada
-                        if "result" in funding_data and isinstance(funding_data["result"], list) and len(funding_data["result"]) > 0:
-                            funding_rate_raw = funding_data["result"][-1].get("interest_8h", "0")
-
-                            try:
-                                self.funding_rates["Deribit_BTCUSDT"] = round(float(funding_rate_raw), 6)
-                            except ValueError:
-                                print(f"⚠️ [Deribit] No se pudo convertir a float {funding_rate_raw}, asignando 0.0")
-                                self.funding_rates["Deribit_BTCUSDT"] = 0.0
+                        if "result" in funding_data and "list" in funding_data["result"]:
+                            self.funding_rate = float(funding_data["result"]["list"][0]["fundingRate"])
                         else:
-                            print("⚠️ [Deribit] No se encontró funding_rate en la respuesta, asignando 0.0")
-                            self.funding_rates["Deribit_BTCUSDT"] = 0.0
-
-                        print(f"📊 [Deribit] Precio: {self.prices['Deribit_BTCUSDT']:.2f}, Funding Rate: {self.funding_rates['Deribit_BTCUSDT']:.6f}")
-
-                    # ✅ Imprimir valores separados de cada exchange para evitar confusión
-                    print(f"\n✅ Estado Final:")
-                    print(f"    OKX     -> Precio: {self.prices.get('OKX_BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('OKX_BTCUSDT', 'N/A'):.6f}")
-                    print(f"    Deribit -> Precio: {self.prices.get('Deribit_BTCUSDT', 'N/A'):.2f}, Funding Rate: {self.funding_rates.get('Deribit_BTCUSDT', 'N/A'):.6f}\n")
+                            self.funding_rate = None
 
                 except Exception as e:
                     print(f"❌ [ERROR] en {self.name}: {e}")
+                    self.price, self.funding_rate = None, None
 
-                await asyncio.sleep(2)
+                    try:
+                        if self.name == "OKX":
+                            ticker_url = f"{self.base_url}/market/ticker?instId=BTC-USDT-SWAP"
+                            funding_url = f"{self.base_url}/public/funding-rate?instId=BTC-USDT-SWAP"
+                        else:  # Deribit
+                            ticker_url = f"{self.base_url}/v5/market/tickers?category=linear&symbol=BTCUSDT"
+                            funding_url = f"{self.base_url}/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=1"
 
 
+                        async with session.get(ticker_url) as resp_ticker, session.get(funding_url) as resp_funding:
+                            ticker_data = await resp_ticker.json()
+                            funding_data = await resp_funding.json()
+
+                        # Procesar respuestas
+                        if self.name == "OKX":
+                            self.price = float(ticker_data["data"][0]["last"]) if "data" in ticker_data else None
+                            self.funding_rate = float(funding_data["data"][0]["fundingRate"]) if "data" in funding_data else None
+                        else:  # Deribit
+                            self.price = float(ticker_data["result"]["index_price"]) if "result" in ticker_data else None
+                            if "result" in funding_data and isinstance(funding_data["result"], list) and len(funding_data["result"]) > 0:
+                                self.funding_rate = float(funding_data["result"][0].get("funding_8h", 0) or 0)
+                            else:
+                                self.funding_rate = 0
+
+                    except Exception as e:
+                        print(f"❌ [ERROR] en {self.name}: {e}")
+                        self.price, self.funding_rate = None, None
 class ArbitrageBot:
-    def __init__(self, exchange_a, exchange_b, leverage=4):
+    def __init__(self, exchange_a, exchange_b):
         self.exchange_a = exchange_a
         self.exchange_b = exchange_b
-        self.leverage = leverage
-    
+
     async def check_opportunity(self):
-        """Check if there is a profitable arbitrage opportunity and execute orders."""
-        funding_a = self.exchange_a.funding_rates.get("BTCUSDT", None)
-        funding_b = self.exchange_b.funding_rates.get("BTCUSDT", None)
+        """Verifica oportunidades de arbitraje y ejecuta operaciones si aplica."""
+        if self.exchange_a.funding_rate is None or self.exchange_b.funding_rate is None:
+            return  
 
-        if funding_a is None or funding_b is None:
-            print("Funding rates not available yet, waiting for data...")
-            return
-        
-        print(f"Checking arbitrage opportunity: OKX funding {funding_a}, Deribit funding {funding_b}")
+        if self.exchange_b.funding_rate > self.exchange_a.funding_rate:
+            print(f"📈 Oportunidad: Short en {self.exchange_b.name}, Long en {self.exchange_a.name}")
+        elif self.exchange_a.funding_rate > self.exchange_b.funding_rate:
+            print(f"📉 Oportunidad: Short en {self.exchange_a.name}, Long en {self.exchange_b.name}")
 
-        if funding_b > funding_a:
-            print(f"Opportunity found! Short on {self.exchange_b.name} ({funding_b}), Long on {self.exchange_a.name} ({funding_a})")
-            await self.execute_trade("short", self.exchange_b, self.exchange_a)
-        elif funding_a > funding_b:
-            print(f"Opportunity found! Short on {self.exchange_a.name} ({funding_a}), Long on {self.exchange_b.name} ({funding_b})")
-            await self.execute_trade("short", self.exchange_a, self.exchange_b)
-        else:
-            print("No arbitrage opportunity detected.")
-
-    async def execute_trade(self, short_side, short_exch, long_exch):
-        """Execute the arbitrage trade."""
-        print(f"Executing trade: Short on {short_exch.name}, Long on {long_exch.name}")
-    
     async def run(self):
-        """Main loop to check opportunities and trade every 2 seconds."""
+        """Loop principal que revisa oportunidades y opera cada 5 segundos."""
         while True:
             await self.check_opportunity()
-            await asyncio.sleep(2)
-
-
-
-# Iniciar bot de arbitraje
-exchange_okx = ExchangeAPI("OKX", "https://www.okx.com/api/v5", OKX_API_KEY, OKX_SECRET_KEY)
-exchange_deribit = ExchangeAPI("Deribit", "https://www.deribit.com/api/v2", DERIBIT_API_KEY, DERIBIT_SECRET_KEY)
-
-# Iniciar bot de arbitraje correctamente
-bot = ArbitrageBot(exchange_okx, exchange_deribit)
-asyncio.create_task(bot.run())
+            await asyncio.sleep(5)
